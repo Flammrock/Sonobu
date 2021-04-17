@@ -35,7 +35,7 @@ class DatabaseToken {
          * @type {string}
          * @public
          */
-         this.database = settings.database || "";
+        this.database = settings.database || "";
 
         /**
          * Le mot de passe pour la connection à un serveur PostgreSQL
@@ -79,7 +79,7 @@ class Command {
      * @param {string} name
      * @param {function} action
      */
-    constructor(name,action) {
+    constructor(name, action) {
         this._name = name;
         this._action = action;
     }
@@ -147,9 +147,9 @@ class Manager {
          * @type {pg.Pool}
          * @private
          */
-         this.pool = null;
+        this.pool = null;
 
-         /**
+        /**
          * tout les events
          * @type {Object.<string, function[]>}
          * @private
@@ -187,7 +187,7 @@ class Manager {
      * @param {function} eventFn - fonction associé
      * @return {boolean} retourne true si l'event a été ajouté, false sinon
      */
-    on(eventName,eventFn) {
+    on(eventName, eventFn) {
         if (typeof eventFn !== 'function') return false;
         if (typeof this.events[eventName] === 'undefined') {
             this.events[eventName] = [eventFn.bind(this)];
@@ -212,9 +212,9 @@ class Manager {
      * @param {Discord.Message} message - objet message
      * @return {boolean} true si la commande a été appelé sinon false si la commande n'a pas été appelé
      */
-    execute(name,message) {
+    execute(name, message) {
         if (typeof this.commands[name] !== 'undefined' && this.commands[name] instanceof Command) {
-            this.commands[name].getAction()(message);
+            this.commands[name].getAction()(this, message).then(() => {}).catch(console.error);
             return true;
         }
         return false;
@@ -241,7 +241,7 @@ class Manager {
             var tokens = body.split(' ');
 
             // on essaie d'exécuter la commande qui porte ce nom
-            return this.execute(tokens[0],message);
+            return this.execute(tokens[0], message);
 
         }
 
@@ -250,12 +250,26 @@ class Manager {
     }
 
     /**
+     * Permet de savoir si un message est une commande
+     * @param {Discord.Message} message
+     * @return {boolean} true s'il s'agit d'une commande, fale sinon
+     */
+    is_command(message) {
+
+      // si le message a été envoyé par un bot, on ignore le message
+      if (message.author.bot) return;
+
+      return message.content.startsWith(this.getPrefix());
+    }
+
+    /**
      * Permet de récuoérer des données de la base
      * @param {Object} settings - paramètres
      * @param {string} settings.table - nom de la table
      * @param {Array.<string>} settings.columns - les colonnes
+     * @param {Array.<string>} settings.identifiers - where
+     * @param {*} settings.values - les valeurs
      * @param {Class} settings.class - classe qui va permettre de constuire les objets
-     * @param {string} settings.condition - condition avec WHERE
      * @param {string} settings.additional - à ajouter en plus de la requête (e.g. ORDER BY, etc...)
      * @return {Class[]} retourne les éléments construit avec la classe
      */
@@ -269,18 +283,159 @@ class Manager {
         if (this.pool == null) return null;
 
         // on récupère un client
-        const client = this.pool.connect();
+        const client = await this.pool.connect();
+
+        // les données
+        var res = false;
 
         // on essai d'exécuter la requête sql
         try {
-            const res = await client.query('SELECT * FROM $1 WHERE id = $1', [1])
-            return res;
+            var j = 1;
+            res = await client.query({
+                text: 'SELECT ' + (typeof settings.columns !== 'undefined' ? settings.columns.join(',') : '*') + ' FROM ' + settings.table + ' WHERE ' +settings.identifiers.map(x => x + ' = ' + '$' + (j++) + '::text').join(' AND '),
+                values: settings.values
+            });
         } finally {
 
             // on a plus besoin du client
             client.release();
 
         }
+
+        return res;
+    }
+
+    /**
+     * Permet d'ajouter/mettre à jour des données de la base
+     * @param {Object} settings - paramètres
+     * @param {string} settings.table - nom de la table
+     * @param {Array.<string>} settings.columns - les colonnes
+     * @param {Array.<string>} settings.identifiers - si une ligne avec ces noms de colonnes existent déjà alors la ligne est mis à jour
+     * @param {Class} settings.class - classe qui va permettre de constuire les objets
+     * @param {*} settings.values - les valeurs à insérer
+     * @return {boolean} retourne true si l'élément a bien été ajouter, false sinon
+     */
+    async set_data(settings) {
+
+        // on définit les paramètres par défaut
+        settings = settings || {};
+
+
+        // s'il n'y a pas de base de données connecté, on quitte directe
+        if (this.pool == null) return null;
+
+        // on récupère un client
+        const client = await this.pool.connect();
+
+        var res = false;
+
+        // on essai d'exécuter la requête sql
+        try {
+
+            var j = 1;
+
+            var already_exist = false;
+
+            var values = [];
+
+            // on construit le tableau des valeurs
+            for (var i = 0; i < settings.identifiers.length; i++) {
+              for (var k = 0; k < settings.columns.length; k++) {
+                if (settings.identifiers[i] == settings.columns[k]) {
+                  values.push(settings.values[k]);
+                }
+              }
+            }
+
+            // on regarde si les données existe déjà
+            if (typeof settings.identifiers !== 'undefined') {
+
+              // on regarde
+              var data = await client.query({
+                text: 'SELECT ' + settings.identifiers.join(',') + ' FROM ' + settings.table + ' WHERE ' + settings.identifiers.map(x => x + ' = ' + '$' + (j++) + '::text').join(' AND '),
+                values: values
+              });
+
+              // si ça existe déjà
+              if (data.rows.length > 0) already_exist = true;
+
+            }
+            
+            if (!already_exist) {
+              // on construit la requête INSERT INTO et on l'envoie
+              j = 1;
+              var d = await client.query({
+                  text: 'INSERT INTO ' + settings.table + ' (' + settings.columns.join(',') + ') VALUES (' + settings.values.map(x => '$' + (j++) + '::text').join(',') + ')',
+                  values: settings.values
+              });
+              if (d.rowCount > 0) {
+                  res = true;
+              }
+            } else {
+              // on construit la requête UPDATE et on l'envoie
+              j = 1;
+              var d = await client.query({
+                  text: 'UPDATE ' + settings.table + ' SET ' + settings.columns.map(x => x + ' = ' + '$' + (j++) + '::text').join(',') + ' WHERE '+settings.identifiers.map(x => x + ' = ' + '$' + (j++) + '::text').join(' AND '),
+                  values: settings.values.concat(values)
+              });
+              if (d.rowCount > 0) {
+                  res = true;
+              }
+            }
+        } catch (e) {
+            console.log(e);
+            res = false;
+        } finally {
+
+            // on a plus besoin du client
+            client.release();
+
+        }
+
+        return res;
+    }
+
+    /**
+     * Permet de supprimer des données de la base
+     * @param {Object} settings - paramètres
+     * @param {string} settings.table - nom de la table
+     * @param {Array.<string>} settings.identifiers - si une ligne avec ces noms de colonnes existent alors cette ligne est supprimée
+     * @param {*} settings.values - les valeurs
+     * @param {Class} settings.class - classe qui va permettre de constuire les objets
+     * @param {Array.<string>} settings.condition - condition avec WHERE
+     * @param {string} settings.additional - à ajouter en plus de la requête (e.g. ORDER BY, etc...)
+     * @return {Class[]} retourne les éléments construit avec la classe
+     */
+    async del_data(settings) {
+
+        // on définit les paramètres par défaut
+        settings = settings || {};
+
+
+        // s'il n'y a pas de base de données connecté, on quitte directe
+        if (this.pool == null) return null;
+
+        // on récupère un client
+        const client = await this.pool.connect();
+
+        // les données
+        var res = false;
+
+        // on essai d'exécuter la requête sql
+        try {
+            var j = 1;
+            res = await client.query({
+                text: 'DELETE FROM ' + settings.table + ' WHERE '+settings.identifiers.map(x => x + ' = ' + '$' + (j++) + '::text').join(' AND '),
+                values: settings.values
+            });
+        } finally {
+
+            // on a plus besoin du client
+            client.release();
+
+        }
+
+        return res;
     }
 
     /**
@@ -288,7 +443,7 @@ class Manager {
      * @param {string} eventName - le nom de l'event à propager
      * @param {*} eventData - les données qu'on envoie
      */
-    fire(eventName,eventData) {
+    fire(eventName, eventData) {
         if (typeof this.events[eventName] !== 'undefined') {
             for (const fn of this.events[eventName]) {
                 fn(eventData);
@@ -301,7 +456,7 @@ class Manager {
      * @param {DatabaseToken} database - le nom du fichier (e.g. "database.db")
      * @param {function} [callback] - callback appelé une fois que la connection a réussi ou échoué
      */
-    async connect(database,callback) {
+    async connect(database, callback) {
         var _this = this;
         try {
             if (this.pool != null) {

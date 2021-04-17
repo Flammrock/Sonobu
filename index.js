@@ -22,10 +22,10 @@ manager.on('sql-error', err => {
 
 // On connecte le manager vers une base de données
 manager.connect(new Bot.DatabaseToken({
-    user: "postgres",
-    password: "flamm147",
-    host: "127.0.0.1",
-    database: "mydatabase",
+    user: "",
+    password: "",
+    host: "",
+    database: "",
     port: 5432
 }), err => {
 
@@ -46,9 +46,92 @@ manager.connect(new Bot.DatabaseToken({
 });
 
 // On ajoute une nouvelle commande
-manager.register(new Bot.Command('ping',function(message){
+manager.register(new Bot.Command('ping',async (manager,message) => {
     message.reply('yo!');
 }));
+
+
+// exemple de système de connection
+manager.register(new Bot.Command('set-nickname',async (manager,message) => {
+
+    // on ajoute/met à jour le nickname de l'utilisateur
+    var res = await manager.set_data({
+      table: "public.users_test",
+      identifiers: ['guild_id','user_id'],
+      columns: ['guild_id','user_id','user_nickname','user_data'],
+      values: [
+        message.guild.id,
+        message.author.id,
+        message.content.substring(message.content.indexOf(' ')+1),
+        "what you want here :) (more interesant to put JSON object here)"
+      ]
+    });
+
+    // si tout c'est bien passé
+    if (res) {
+      message.reply('bien reçu !');
+    }
+
+    // s'il y a eu un problème
+    else {
+      message.reply('oops, une erreur est survenue !');
+    }
+}));
+
+manager.register(new Bot.Command('get-nickname',async (manager,message) => {
+
+    // on récupère le nickname de l'utilisateur
+    var res = await manager.get_data({
+      table: "public.users_test",
+      identifiers: ['guild_id','user_id'],
+      values: [
+        message.guild.id,
+        message.author.id
+      ]
+    });
+
+    // si tout c'est bien passé
+    if (res) {
+
+      // on regarde si l'utilisateur possède un nickname
+      if (res.rows.length > 0) {
+        message.reply(`votre nickname est "${res.rows[0].user_nickname}"`);
+      } else {
+        message.reply(`vous n'avez pas de nickname !`);
+      }
+      
+    }
+
+    // s'il y a eu un problème
+    else {
+      message.reply('oops, une erreur est survenue !');
+    }
+}));
+
+manager.register(new Bot.Command('del-nickname',async (manager,message) => {
+
+    // on supprime le nickname de l'utilisateur
+    var res = await manager.del_data({
+      table: "public.users_test",
+      identifiers: ['guild_id','user_id'],
+      values: [
+        message.guild.id,
+        message.author.id
+      ]
+    });
+
+    // si tout c'est bien passé
+    if (res) {
+      message.reply('votre nickname a été supprimé');
+    }
+
+    // s'il y a eu un problème
+    else {
+      message.reply('oops, une erreur est survenue !');
+    }
+}));
+
+
 
 client.on('ready', () => {
     console.log(`[bot] Logged in as ${client.user.tag}!`);
@@ -56,7 +139,19 @@ client.on('ready', () => {
 
 client.on('message', msg => {
 
-    manager.handle(msg);
+    // si l'utilisateur est un bot, on fait rien
+    if (msg.author.bot) return;
+
+    // si ce n'est pas une commande on quitte
+    if (!manager.is_command(msg)) return;
+
+    // on envoie le message dans le système de commande
+    var r = manager.handle(msg);
+
+    // si aucune commande n'a été exécuté
+    if (!r) {
+      msg.reply('désolé, cette commande n\'existe pas !');
+    }
 
     /*
     if (msg.content === 'ping') {
@@ -75,4 +170,4 @@ client.on('message', msg => {
     }*/
 });
 
-client.login('token');
+client.login('');
