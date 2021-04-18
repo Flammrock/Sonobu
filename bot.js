@@ -174,11 +174,24 @@ class Manager {
 
     /**
      * Permet d'ajouter une commande
-     * @param {Command} command 
+     * @param {Command|Array.<Command>} command 
      */
     register(command) {
-        this.commands[command.getName()] = command;
-        command.bindAction(this);
+
+        // On regarde si "command" est un tableau
+        if (Array.isArray(command)) {
+          for (var i = 0; i < command.length; i++) {
+            this.commands[command[i].getName()] = command[i];
+            command[i].bindAction(this);
+          }
+        }
+
+        // Sinon il s'agit d'une commande
+        else {
+          this.commands[command.getName()] = command;
+          command.bindAction(this);
+        }
+       
     }
 
     /**
@@ -247,6 +260,49 @@ class Manager {
 
         // aucune commande n'a été appelé, on renvoie false
         return false;
+    }
+
+    /**
+     * Permet de gérer un message et de faire parler le perso du membre
+     * @param {Discord.Message} message
+     * @return {boolean} true si un préfix existe avec ce perso, false sinon
+     */
+    async handle_perso(message) {
+      // sinon, on regarde si l'utilisateur utilise son perso
+      var res = await this.get_data({
+        table: "public.users_test",
+        identifiers: ['guild_id','user_id'],
+        values: [
+          message.guild.id,
+          message.author.id
+        ]
+      });
+      if (res) {
+        if (res.rows.length > 0) {
+          var user = res.rows[0];
+          var data = {};
+          var perso = null;
+          try {
+            data = JSON.parse(user.user_data);
+          } catch (e) {return false;}
+          for (var i = 0; i < data.perso.length; i++) {
+            if (message.content.startsWith(data.perso[i].prefix)) {
+              perso = data.perso[i];
+              break;
+            }
+          }
+          if (perso != null) {
+            message.delete().then(()=>{}).catch(()=>{});
+            try {
+              var webhook = await message.channel.createWebhook(perso.name, {avatar: perso.avatar});
+              await webhook.send(message.content.substring(perso.prefix.length));
+              await webhook.delete();
+              return true;
+            } catch (e) {message.channel.send(e.name + ': ' + e.message);}
+          }
+        }
+      }
+      return false;
     }
 
     /**

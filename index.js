@@ -4,11 +4,15 @@ const client = new Discord.Client();
 // On récupère toutes les classes pour pouvoir manipuler notre bot plus facilement
 const Bot = require('./bot');
 
+// On récupère les commandes qui permettent
+// de gérer les personnages (un peu à la @TupperBox)
+var persoCommands = require('./commands/perso');
+
 // On récupère le manager associé (et on lui passe le client discord)
 const manager = new Bot.Manager(client);
 
 // On définit un préfix pour notre bot
-manager.setPrefix('$');
+manager.setPrefix('&');
 
 manager.on('sql-error', err => {
 
@@ -22,11 +26,7 @@ manager.on('sql-error', err => {
 
 // On connecte le manager vers une base de données
 manager.connect(new Bot.DatabaseToken({
-    user: "",
-    password: "",
-    host: "",
-    database: "",
-    port: 5432
+
 }), err => {
 
     // on regarde s'il y a une erreur
@@ -50,8 +50,11 @@ manager.register(new Bot.Command('ping',async (manager,message) => {
     message.reply('yo!');
 }));
 
+// On register toutes les commandes pour les persos
+manager.register(persoCommands);
 
-// exemple de système de connection
+
+// exemple de système de nickname
 manager.register(new Bot.Command('set-nickname',async (manager,message) => {
 
     // on ajoute/met à jour le nickname de l'utilisateur
@@ -137,16 +140,21 @@ client.on('ready', () => {
     console.log(`[bot] Logged in as ${client.user.tag}!`);
 });
 
-client.on('message', msg => {
+client.on('message', async msg => {
 
     // si l'utilisateur est un bot, on fait rien
     if (msg.author.bot) return;
 
-    // si ce n'est pas une commande on quitte
-    if (!manager.is_command(msg)) return;
+    // si ce n'est pas une commande on essai de faire parler le perso
+    if (!manager.is_command(msg)) {
+
+      manager.handle_perso(msg);
+
+      return;
+    }
 
     // on envoie le message dans le système de commande
-    var r = manager.handle(msg);
+    var r = await manager.handle(msg);
 
     // si aucune commande n'a été exécuté
     if (!r) {
